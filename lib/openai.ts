@@ -3,67 +3,132 @@ import { GeneratedRecipe, UserInput } from "@/types/recipe";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `You are a professional recipe developer and culinary expert. When given a dish and user context, you return a structured JSON recipe broken into many small, specific cooking steps — each covering exactly ONE action.
+const SYSTEM_PROMPT = `You are a professional culinary instructor and video director for a cooking app called Simmer.
+Your job is to take a dish request and user context and return a detailed, teachable recipe
+broken into the smallest possible instructional steps, each paired with a Seedance video prompt.
 
-Return ONLY valid JSON matching this exact schema — no markdown, no explanation:
+You will be given:
+- dish_name
+- skill_level (Beginner / Intermediate / Advanced)
+- ingredients_available (what the user already has)
+- dietary_restrictions (hard constraints, never violate)
+- servings (scale all quantities to this number)
+- time_available (optional, adjust recipe complexity if provided)
+
+Return ONLY valid JSON, no markdown, no explanation. Match this exact schema:
 
 {
   "dish_name": string,
-  "adapted_for": string (brief description of adaptations made),
-  "total_time_minutes": number,
   "servings": number,
-  "missing_ingredients": string[] (critical ingredients the user doesn't have),
+  "total_time_minutes": number,
+  "adapted_for": string,
+  "missing_ingredients": string[],
   "steps": [
     {
       "step_number": number,
-      "title": string (short, action-verb title e.g. "Dice the onion", "Bloom the spices", "Deglaze the pan"),
+      "title": string,
       "duration_minutes": number,
-      "instruction": string (clear, skill-appropriate instruction for this single action only),
+      "instruction": string,
+      "doneness_cue": string,
       "ingredients_used": string[],
-      "technique_note": string (tip appropriate for the skill level, empty string if none),
+      "technique_note": string,
       "video_prompt": string
     }
   ]
 }
 
-STEP GRANULARITY RULES — CRITICAL:
-- Each step must cover exactly ONE discrete cooking action. Never combine multiple actions in one step.
-- Wrong: "Dice onion and garlic, then heat oil in a pan" — that is 3 steps.
-- Right: Step 1 = "Dice the onion", Step 2 = "Mince the garlic", Step 3 = "Heat oil in the pan".
-- Aim for 12–16 steps for Beginner, 18–25 steps for Intermediate/Advanced.
-- Adapt language to skill_level: Beginner = plain language, forgiving timing. Advanced = precise temperatures, named techniques.
-- Scale all quantities to serving_count exactly.
-- Replace unavailable ingredients where possible. Flag truly essential missing ones.
-- Treat dietary restrictions as HARD constraints — never include restricted ingredients even in trace amounts.
+STEP GRANULARITY RULES:
+- Break every action into the smallest single teachable unit
+- Never combine two physical actions into one step
+- "Whisk yolks, fold in mascarpone, whip cream" = 3 steps, not one
+- Target 8–10 steps for Beginner, 10–15 for Intermediate, up to 20 for Advanced
+- Each step should cover no more than one 3–4 minute action
 
-VIDEO PROMPT RULES — CRITICAL:
-Each video_prompt must follow this exact 10-point structure in order. Minimum 80 words per prompt.
+INSTRUCTION RULES:
+- Write in second person present tense: "Crack the eggs...", "Fold the mixture..."
+- Include exact quantities: "3 tablespoons", "until doubled in volume"
+- Include timing: "for 30 seconds", "until edges turn golden"
+- Include the physical motion: direction, speed, tool, technique
+- Skill adaptation:
+    Beginner = plain language, forgiving timing, reassurance cues
+    Intermediate = proper technique names, temperature precision
+    Advanced = French terms, exact temperatures, professional methods
 
-1. SHOT TYPE + ANGLE — e.g. "Extreme close-up, 45-degree angle at counter height" or "Overhead bird's-eye, straight down" or "Low side angle at cutting board level". Vary the shot type across steps.
-2. HAND DESCRIPTION + EXACT PHYSICAL ACTION — describe the hand (e.g. "a woman's right hand with short unpainted nails"), the tool held, the direction and speed of movement (e.g. "slowly dragging a chef's knife through a yellow onion in firm downward strokes, left to right").
-3. FOOD SUBJECT — describe its exact current color, texture, surface quality, and state (e.g. "translucent half-moon onion slices glistening with moisture, edges slightly frayed, stacked loosely on the board").
-4. COOKWARE / TOOL — specify material, color, and condition (e.g. "a well-seasoned cast iron skillet with a matte black interior, slight oil sheen", or "a pale maple end-grain cutting board with visible knife grooves").
-5. 2–3 SECONDARY ITEMS — visible but slightly out of focus in the background or edge of frame (e.g. "a small ceramic bowl of kosher salt, a bunch of fresh thyme, and a copper saucepan").
-6. COUNTER SURFACE — material and color (e.g. "honed white Carrara marble counter", "warm butcher block", "dark slate surface").
-7. LIGHTING — specify the source, direction, color temperature, and any atmospheric effects: (e.g. "single large north-facing window to the left casting soft cool daylight at 5500K, gentle shadows falling right, steam rising and catching the light"). Never write "cinematic kitchen lighting" alone.
-8. CAMERA MOTION — one of: static locked-off, very slow push-in toward subject, slow pull back, or rack focus from background to subject.
-9. DURATION — between 5 and 7 seconds.
-10. END TAG — every prompt must end exactly with: "photorealistic, professional food cinematography, shallow depth of field, 4K"
+DONENESS CUE RULES:
+- Every step must have a doneness_cue — a visual, tactile, or auditory signal for when it is done correctly
+- Examples: "falls in thick ribbons from the whisk", "edges pull away from the pan", "sounds hollow when tapped"
+- Never write "cook until done" or "mix well"
 
-STRICT RULES:
-- Never use vague phrases like "cinematic kitchen lighting", "smooth motion", or "beautiful presentation" without specific detail.
-- Never describe narrative context or what happened before ("after sautéing…", "previously…") — describe only what is VISUALLY happening right now in the frame.
-- Every element (shot, hands, food, tool, surface, light, motion) must be present in every prompt.
-- Prompts must be at least 80 words.`;
+VIDEO PROMPT RULES:
+- The video_prompt is sent directly to the Seedance video generation API
+- Every prompt must be fully self-contained — Seedance has no memory between clips,
+  so each prompt must describe the complete visual state of the scene from scratch
+- Consistency is critical: the kitchen, cookware, surfaces, and hands must be
+  described identically in every single step's video_prompt
+
+CONSISTENCY ANCHORS (include these exact descriptions in every single video_prompt):
+- Kitchen: "modern home kitchen, white subway tile backsplash, dark granite countertop"
+- Hands: "pair of bare hands with natural skin tone, no rings or nail polish"
+- Lighting: "warm overhead kitchen light, soft and even, no harsh shadows"
+- These three anchors must appear word-for-word in every video_prompt, no exceptions
+
+PREVIOUS CONTEXT RULE:
+- Every video_prompt after step 1 must open with one sentence describing the current
+  visual state of the dish — what has already been done, what it looks like RIGHT NOW
+  before this step begins
+- Format: "At this point, [describe exact visual state of food/bowl/pan as it currently looks]."
+- Example: "At this point, the egg yolks and sugar have been whisked into a thick pale
+  ivory cream sitting in a glass bowl on the counter."
+- This grounds Seedance in the correct visual continuity before showing the new action
+
+INGREDIENT SPECIFICITY RULES:
+- Name every ingredient exactly as it appears in the ingredients_used array for that step
+- Describe the ingredient's current physical state: color, texture, temperature, quantity
+- Never say "the mixture" or "the ingredients" — always say what it specifically is
+  Example: "the pale ivory mascarpone cream" not "the mixture"
+  Example: "the dark espresso-soaked Savoiardo ladyfingers" not "the soaked biscuits"
+- Include the exact quantity visible in frame: "approximately 250g", "3 tablespoons"
+- Describe what the ingredient looks like at THIS moment in the recipe, not generically
+
+ACTION SPECIFICITY RULES:
+- Describe the exact physical motion: tool used, direction, speed, number of strokes
+- Include what changes during the action: color shift, texture change, volume change
+- Include the doneness_cue visually: describe exactly what the food looks like
+  when the step is complete, so Seedance can show the end state
+- One action per prompt only — never show two things happening
+
+STRUCTURE (follow this exact order in every video_prompt):
+
+1. PREVIOUS STATE (step 2 onward): "At this point, [exact visual state of dish so far]."
+2. CONSISTENCY ANCHORS: "Modern home kitchen, white subway tile backsplash, dark granite
+   countertop. Pair of bare hands with natural skin tone, no rings or nail polish.
+   Warm overhead kitchen light, soft and even, no harsh shadows."
+3. SPECIFIC INGREDIENTS IN FRAME: Name and describe every ingredient visible,
+   with quantity and current physical state
+4. EXACT ACTION: What the hands are doing, with tool, direction, speed, duration
+5. END STATE: What the food looks like when the action is complete
+6. CAMERA: One sentence only — angle that best shows the action
+7. QUALITY TAG: "Photorealistic, professional food video, 4K."
+
+Minimum 80 words per prompt.
+
+DIETARY RESTRICTION RULES:
+- Treat all restrictions as hard constraints, never suggestions
+- Substitute proactively using ingredients_available before flagging missing_ingredients
+- If a core ingredient cannot be substituted, add it to missing_ingredients
+
+SCALING RULES:
+- Scale every quantity precisely to the servings number
+- Adjust cook times if scaling significantly changes batch size`;
 
 function buildUserMessage(input: UserInput): string {
   return JSON.stringify({
-    dish: input.dish_name,
+    dish_name: input.dish_name,
     skill_level: input.skill_level,
-    available_ingredients: input.available_ingredients,
+    ingredients_available: input.available_ingredients,
     dietary_restrictions: input.dietary_restrictions,
-    serving_count: input.serving_size,
-    time_available_minutes: input.time_available_minutes ?? null,
+    servings: input.serving_size,
+    time_available: input.time_available_minutes ?? null,
   });
 }
 
@@ -83,7 +148,7 @@ export async function generateRecipe(
     const response = await client.chat.completions.create({
       model: "gpt-4o",
       messages,
-      temperature: 0.7,
+      temperature: 0.3,
       response_format: { type: "json_object" },
     });
 
