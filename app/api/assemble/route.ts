@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
 import { assembleVideo } from "@/lib/ffmpeg";
 import { uploadVideoToBlob, cleanupFile } from "@/lib/storage";

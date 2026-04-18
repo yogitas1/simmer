@@ -3,7 +3,7 @@ const nextConfig = {
   // Increase body size limit for video uploads
   experimental: {
     // Allow server routes to use native node packages
-    serverComponentsExternalPackages: ["fluent-ffmpeg", "@ffmpeg-installer/ffmpeg"],
+    serverComponentsExternalPackages: ["fluent-ffmpeg", "@ffmpeg-installer/ffmpeg", "openai"],
   },
 
   // External image/video domains (add your Vercel Blob hostname here)
